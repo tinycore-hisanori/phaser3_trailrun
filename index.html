@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+
+    <meta name="viewport"
+        content="width = device-width, initial-scale = 1.0, minimum-scale = 1, maximum-scale = 1, user-scalable = no, viewport-fit=cover,minimal-ui" />
+    <title></title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/matter-js@0.17.1/build/matter.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/howler@2.2.3/dist/howler.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
+</head>
+
+<style type="text/css">
+    body {
+        background-color: black;
+        min-height: 100vh;
+        min-width: 100vw;
+        height: 100%;
+        width: 100vw;
+        margin: auto;
+    }
+
+    #container {
+        position: absolute;
+        overflow: hidden;
+    }
+</style>
+
+<body>
+    <script>
+
+        var bgm = new Howl({
+            src: ['bgm.mp3']
+        });
+
+        var bgmOver = new Howl({
+            src: ['gameover.mp3']
+        });
+
+        var bgmClear = new Howl({
+            src: ['clear.mp3']
+        });
+
+
+
+        var gameWidth = 720;
+        var gameHeight = 1280;
+        var currentScene = null;
+        let STATE_IDLE = 0;
+        let STATE_MOVING = 1;
+        let STATE_EATING = 2;
+        let STATE_EXPLOSION = 10;
+        //        let STATE_DAMAGINE = 3;
+        var pushingKeyCode = 0;//0:NONE, 1:RIGHT, 2:LEFT
+        var pushingJumpBtn = 0;//0:NONE, 1:Pushed
+
+
+        var SPACE_KEY;
+        var bGame = false;
+        var timerCnt = 0;
+        var tekiArray = [];
+        var groundBlocks = [];
+        var movingBlocks = [];
+        var isState = STATE_IDLE;
+        var isTouchingGround = false;
+        var remainTime = 0;
+        var txtTime, txtEnding, btnReturn, clickButton;
+        var player, aniChara, container1, goalObj, tekiObj, cursors, mainCamera, shapes, tekiObj1, tekiObj2;
+
+        var hiScores = [0, 0, 0, 0, 0];
+
+        class iceContainer extends Phaser.GameObjects.Container {
+            constructor(scene, x, y) {
+                super(scene, x, y);
+                this._obj = scene.add.sprite(0, 0, "ice");
+                this.add(this._obj);
+                this.setSize(16, 16);
+                this._bodyObj = scene.matter.add.gameObject(this);
+                this._bodyObj.setMass(50);
+                this._bodyObj.body.label = "ground";
+                scene.add.existing(this._bodyObj);
+            }
+        }
+
+        class boxContainer extends Phaser.GameObjects.Container {
+            constructor(scene, x, y) {
+                super(scene, x, y);
+                this._obj = scene.add.sprite(0, 0, "box");
+                this.add(this._obj);
+                this.setSize(60, 50);
+                this._bodyObj = scene.matter.add.gameObject(this);
+                this._bodyObj.setFixedRotation();
+                this._bodyObj.setMass(200);
+                this._bodyObj.body.label = "ground";
+                scene.add.existing(this._bodyObj);
+            }
+        }
+
+        class titleScene extends Phaser.Scene {
+            constructor() {
+                super({ key: "titleScene", active: true });
+            }
+            preload() {
+                this.load.image("title", "./title.png");
+            }
+            create() {
+                currentScene = this;
+                //                var bg001 = this.add
+                //                    .tileSprite(0, 0, gameWidth, gameHeight, 'title')
+                //                    .setOrigin(0)
+                //                    .setScrollFactor(0);
+
+                let text = this.add
+                    .text(200, 100, "Trail Runner!!")
+                    .setFontSize(46)
+                    .setColor("#0");
+
+                clickButton = this.add
+                    .text(200, 300, "START TO CLICK")
+                    .setStroke("#0000ff", 4)
+                    .setBackgroundColor("#ddbcff")
+                    .setFontSize("40px")
+                    .setColor("#0f0")
+                    .setInteractive();
+                clickButton.on(
+                    "pointerdown",
+                    () => {
+                        this.scene.start("gameScene1");
+                    },
+                    this);
+
+                let txtRanking = this.add
+                    .text(420, 500, "【RANKING】\r\n")
+                    .setFontSize(32)
+                    .setStroke("#AABB11", 4)
+                    .setColor("#AABB11");
+                localforage.getItem("trailrunHiscore", function (err, value) {
+                    if (value != null) {
+                        for (var i = 0; i < 5; i++) {
+                            hiScores[i] = value[i];
+                        }
+                    }
+                    for (var i = 0; i < 5; i++) {
+                        txtRanking.text = txtRanking.text + "  No." + (i + 1) + ":" + hiScores[i] + "\r\n";
+                    }
+                });
+
+                this.tweens.add({
+                    targets: clickButton,
+                    alpha: 0.5,
+                    ease: 'Cubic.easeOut',
+                    duration: 500,
+                    repeat: -1,
+                    yoyo: true
+                })
+            }
+        }
+
+
+        class gameScene1 extends Phaser.Scene {
+            constructor() {
+                super({ key: "gameScene1", active: false });
+            }
+            preload() {
+                this.load.image("bg001", "./bg.png");
+                this.load.atlas('sheet', 'texture-data.png', 'texture-data.json');
+                this.load.json('shapes', 'platform-data.json');
+                this.load.spritesheet("player", "./player.png", {
+                    frameWidth: 80,
+                    frameHeight: 80
+                });
+
+                this.load.image("goal", "./goal.png");
+
+                this.load.image("ghost", "./ghost.png");
+                this.load.image("ball", "./ball.png");
+                this.load.image("box", "./box.png");
+                this.load.image("ice", "./ice.png");
+
+
+            }
+
+
+
+            create() {
+                currentScene = this;
+                var bg = this.add
+                    .tileSprite(0, 0, gameWidth, gameHeight, 'bg001')
+                    .setOrigin(0)
+                    .setScrollFactor(0);
+
+                this.matter.world.setBounds(0, -500, 720, 2000);
+                shapes = this.cache.json.get('shapes');
+                groundBlocks = [];
+                groundBlocks.push(this.matter.add.image(300, -410, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, -100, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(100, 0, 'sheet', 'platform003.png', { shape: shapes.platform003 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(0, 100, 'sheet', 'platform003.png', { shape: shapes.platform003 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(400, 220, 'sheet', 'platform003.png', { shape: shapes.platform003 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(200, 350, 'sheet', 'platform003.png', { shape: shapes.platform003 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 480, 'sheet', 'platform003.png', { shape: shapes.platform003 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(100, -200, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, -0, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 100, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(0, 200, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(200, 350, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, 450, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, -240, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(700, -40, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(0, 10, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(200, 300, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 500, 'sheet', 'platform006.png', { shape: shapes.platform006 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(700, 450, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(600, 400, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(0, 500, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 600, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(0, 700, 'sheet', 'platform006.png', { shape: shapes.platform006 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, 850, 'sheet', 'platform006.png', { shape: shapes.platform006 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(-100, 1200, 'sheet', 'platform006.png', { shape: shapes.platform006 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(-100, 600, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, 800, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(700, 1000, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(100, 700, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, 800, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 800, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(700, 1300, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 1300, 'sheet', 'platform002.png', { shape: shapes.platform002 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(50, 1100, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(200, 1000, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(600, 1000, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(100, 1200, 'sheet', 'platform001.png', { shape: shapes.platform001 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(0, 1500, 'sheet', 'platform004.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(150, 1500, 'sheet', 'platform002.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(300, 1500, 'sheet', 'platform002.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(400, 1500, 'sheet', 'platform002.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(500, 1500, 'sheet', 'platform002.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(600, 1500, 'sheet', 'platform002.png', { shape: shapes.platform004 }).setStatic(true));
+                groundBlocks.push(this.matter.add.image(700, 1500, 'sheet', 'platform002.png', { shape: shapes.platform004 }).setStatic(true));
+
+                for (var i = 0; i < groundBlocks.length; i++) {
+                    groundBlocks[i].body.label = "ground";
+                }
+
+                movingBlocks = [];
+                movingBlocks.push(new boxContainer(this, 500, 100));
+
+                movingBlocks.push(new boxContainer(this, 400, 700));
+                movingBlocks.push(new boxContainer(this, 500, 700));
+                movingBlocks.push(new boxContainer(this, 600, 700));
+                movingBlocks.push(new boxContainer(this, 400, 600));
+                movingBlocks.push(new boxContainer(this, 500, 600));
+                movingBlocks.push(new boxContainer(this, 600, 600));
+
+                movingBlocks.push(new boxContainer(this, 600, 700));
+                movingBlocks.push(new boxContainer(this, 700, 700));
+
+                movingBlocks.push(new iceContainer(this, 200, -400));
+                movingBlocks.push(new iceContainer(this, 100, -400));
+                movingBlocks.push(new iceContainer(this, 300, -400));
+                movingBlocks.push(new iceContainer(this, 200, -300));
+                movingBlocks.push(new iceContainer(this, 200, -400));
+                movingBlocks.push(new iceContainer(this, 100, -400));
+                movingBlocks.push(new iceContainer(this, 300, -400));
+                movingBlocks.push(new iceContainer(this, 200, -300));
+                movingBlocks.push(new iceContainer(this, 200, -400));
+                movingBlocks.push(new iceContainer(this, 100, -400));
+                movingBlocks.push(new iceContainer(this, 300, -400));
+                movingBlocks.push(new iceContainer(this, 200, -300));
+
+                //                movingBlocks.push(new boxContainer(this, 600, 800));
+                //                movingBlocks.push(new boxContainer(this, 700, 800));
+
+
+
+
+                aniChara = this.add.sprite(0, 0, "player");
+                this.anims.create({
+                    key: "normal",
+                    frameRate: 5,
+                    frames: this.anims.generateFrameNumbers("player", { start: 0, end: 3 }),
+                    repeat: -1
+                });
+                aniChara.play("normal");
+
+                container1 = this.add.container(300, -500, [aniChara]);
+                const bodyCircle = this.matter.add.circle(300, -500, 30);//x,y,radius
+                player = this.matter.add.gameObject(container1, bodyCircle);
+                player.body.label = "player";
+                player.setBounce(0.0);
+
+                mainCamera = this.cameras.main;
+                mainCamera.startFollow(player);
+                mainCamera.setFollowOffset(0, 0);
+                mainCamera.setBounds(0, -500, 720, 2000);
+
+                cursors = this.input.keyboard.createCursorKeys();
+                SPACE_KEY = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+                //                mainCamera.setLerp(0,0);
+
+                let goalImg = this.add.image(0, 0, 'goal');
+                goalObj = this.add.container(150, 800, [goalImg]);
+                goalObj.setSize(60, 50);
+                let goalObjBody = this.matter.add.gameObject(goalObj);
+                goalObjBody.setFixedRotation();
+                goalObjBody.setStatic(true);
+                goalObjBody.body.label = "goal";
+                goalObjBody.label = "goal";
+
+                this.matter.world.on("collisionactive", function (e) {
+                    isTouchingGround = false;
+                    e.pairs.forEach(function (p) {
+                        if (p.bodyA.label == "player" || p.bodyB.label == "player") {
+                            //Check touch on the ground
+                            if ((p.bodyA.parent.label == "ground") || (p.bodyB.parent.label == "ground")) {
+                                isTouchingGround = true;
+                            }
+                            else if (p.bodyA.label == "goal" || p.bodyB.label == "goal") {//touch on the goal flag
+                                doGoal();
+                            }
+
+                        }
+                    });
+                });
+
+
+                remainTime = 30;
+                timerCnt = 0;
+                bGame = true;
+
+                txtTime = this.add
+                    .text(50, 20, "残り時間：" + remainTime)
+                    .setScrollFactor(0)
+                    .setFontSize(30)
+                    .setStroke("#ffffff", 2)
+                    .setColor("#ffffff");
+
+                txtEnding = this.add
+                    .text(200, 100, "")
+                    .setScrollFactor(0)
+                    .setFontSize(46)
+                    .setColor("#ff0");
+
+                btnReturn = this.add
+                    .text(gameWidth / 2 - 100, 400, " BACK ")
+                    .setScrollFactor(0)
+                    .setFontSize(46)
+                    .setColor("#ff0")
+                    .setBackgroundColor("#aa5500")
+                    .setInteractive();
+                btnReturn.on(
+                    "pointerdown",
+                    () => {
+                        if (bgm != null) {
+                            bgm.stop();
+                        }
+                        if (bgmOver != null) {
+                            bgmOver.stop();
+                        }
+                        this.scene.start("titleScene");
+                    },
+                    this);
+                btnReturn.visible = false;
+
+
+            }
+
+
+            update() {
+                if (bGame == true) {
+                    timerCnt = (timerCnt + 1) % 60;
+                    if (timerCnt == 0) {
+
+                        remainTime = remainTime - 1;
+                        txtTime.text = "残り時間：" + remainTime;
+                        if (remainTime <= 0) {
+                            doGameOver();
+                        }
+                    }
+
+                    if (cursors.left.isDown || pushingKeyCode == 2) {
+                        aniChara.flipX = true;
+                        player.setVelocityX(-4);
+                        if (isState == STATE_IDLE) {
+                            isState = STATE_MOVING;
+                        }
+                    } else if (cursors.right.isDown || pushingKeyCode == 1) {
+                        aniChara.flipX = false;
+                        player.setVelocityX(4);
+                        if (isState == STATE_IDLE) {
+                            isState = STATE_MOVING;
+                        }
+                    }
+                    var bPushJump = false;
+                    if (pushingJumpBtn == 1 || Phaser.Input.Keyboard.JustDown(SPACE_KEY)) {
+                        pushingJumpBtn = 0;
+                        bPushJump = true;
+                    }
+                    if (bPushJump == true && isTouchingGround) {
+                        player.setVelocityY(-22);
+                        isTouchingGround = false;
+                    }
+                }
+            }
+        }
+
+        function doGoal() {
+            if (bGame == true) {
+                bGame = false;
+                var nCheck = checkUpdateRank(remainTime);
+                if(nCheck != -1){
+                    txtEnding.text = "GAME CLEAR\r\n(You are No." + nCheck + ")";
+                } else {
+                    txtEnding.text = "GAME CLEAR";
+                }
+                txtEnding.visible = true;
+                btnReturn.visible = true;
+                mainCamera.stopFollow();
+                player.setVelocity(0, 0);
+                player.x = goalObj.x;
+                player.y = goalObj.y;
+                goalObj.destroy(true);
+            }
+        }
+
+        function doGameOver() {
+            mainCamera.stopFollow();
+            bGame = false;
+            txtEnding.text = "GAME OVER";
+            txtEnding.visible = true;
+            btnReturn.visible = true;
+        }
+
+        function checkUpdateRank(_score) {
+            var nRank = -1;
+            for (var i = 0; i < 5; i++) {
+                if (hiScores[i] < _score) {
+                    nRank = i + 1;
+                    for (var j = 5; j >= i; j--) {
+                        hiScores[j] = hiScores[j - 1];
+                    }
+                    hiScores[i] = _score;
+                    localforage.setItem("trailrunHiscore", hiScores);
+                    break;
+                }
+            }
+            return nRank;
+        }
+
+
+        var config = {
+            type: Phaser.AUTO,
+            width: gameWidth,
+            height: gameHeight,
+            input: {
+                activePointers: 10 //Max enable of multi touch Points(1-10)
+            },
+            backgroundColor: "#eaffff",
+            autoResize: true,
+            physics: {
+                default: "matter",
+                matter: {
+                    gravity: {
+                        x: 0, y: 2.5
+                    },
+                    debug: true
+                }
+            },
+            scale: {
+                mode: Phaser.Scale.FIT,
+                autoCenter: Phaser.Scale.CENTER_BOTH,
+            },
+            parent: 'game',
+            audio: { disableWebAudio: true },
+            scene: [titleScene, gameScene1]
+        }
+        var game = new Phaser.Game(config);
+
+    </script>
+</body>
+
+</html>
